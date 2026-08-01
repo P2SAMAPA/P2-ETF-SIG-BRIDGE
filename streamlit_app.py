@@ -58,4 +58,306 @@ US_HOLIDAYS = {
 }
 
 def next_trading_day() -> str:
-    d = date.today() + timedelta(days
+    d = date.today() + timedelta(days=1)
+    while d.weekday() >= 5 or d in US_HOLIDAYS:
+        d += timedelta(days=1)
+    return d.strftime("%B %d, %Y")
+
+def action_badge(action: str) -> str:
+    if "STRONG BUY" in action:
+        return f'<span class="badge-strongbuy">🟢 {action}</span>'
+    elif "BUY" in action:
+        return f'<span class="badge-buy">🟢 {action}</span>'
+    elif "STRONG SELL" in action:
+        return f'<span class="badge-strongsell">🔴 {action}</span>'
+    elif "SELL" in action:
+        return f'<span class="badge-sell">🔴 {action}</span>'
+    else:
+        return f'<span class="badge-hold">🟡 {action}</span>'
+
+def safe_float(val, default=0.0):
+    if val is None:
+        return default
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return default
+
+
+@st.cache_data(ttl=3600)
+def list_repo_files():
+    if not HF_TOKEN:
+        return []
+    try:
+        api = HfApi(token=HF_TOKEN)
+        return api.list_repo_files(repo_id=RESULTS_REPO, repo_type="dataset", token=HF_TOKEN)
+    except Exception:
+        return []
+
+
+def find_latest(files, prefix):
+    matches = sorted([f for f in files if f.endswith(".json") and prefix in f], reverse=True)
+    return matches[0] if matches else None
+
+
+@st.cache_data(ttl=3600)
+def load_json_from_hf(path):
+    if not HF_TOKEN:
+        return {"error": "HF_TOKEN not set"}
+    try:
+        api = HfApi(token=HF_TOKEN)
+        content = api.hf_hub_download(repo_id=RESULTS_REPO, filename=path, repo_type="dataset", token=HF_TOKEN)
+        with open(content, 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ── Sidebar ───────────────────────────────────────────────────────────────────
+st.sidebar.markdown("## 🌉 Sig-Bridge")
+st.sidebar.markdown(f"**Next Trading Day**")
+st.sidebar.markdown(f"`{next_trading_day()}`")
+st.sidebar.markdown(f"**Signature Depth:** {config.SIGNATURE['depth']}")
+st.sidebar.markdown(f"**Time Steps:** {config.BRIDGE['n_time_steps']}")
+st.sidebar.markdown(f"**Paths:** {config.BRIDGE['n_paths']}")
+st.sidebar.markdown("---")
+st.sidebar.markdown("**Macro signals:**")
+for col, desc, w, sign in config.MACRO_SIGNALS:
+    arrow = "↑risk-on" if sign > 0 else "↑risk-off"
+    st.sidebar.markdown(f"  • {col} ({arrow}, w={w:.0%})")
+
+# ── Load data ─────────────────────────────────────────────────────────────────
+files = list_repo_files()
+if not files:
+    st.error("No results found. Run trainer.py first.")
+    st.stop()
+
+tab1_path = find_latest(files, "sig_bridge_")
+tab2_path = find_latest(files, "sig_bridge_breakdown_")
+
+if not tab1_path:
+    st.error("No results found. Run trainer.py first.")
+    st.stop()
+
+data1 = load_json_from_hf(tab1_path)
+if "error" in data1:
+    st.error(f"Error loading data: {data1['error']}")
+    st.stop()
+
+data2 = load_json_from_hf(tab2_path) if tab2_path else None
+
+st.sidebar.markdown("---")
+st.sidebar.markdown(f"**Run date:** `{data1.get('run_date','?')}`")
+st.sidebar.success(f"✅ {len(data1.get('universes', {}))} universes")
+
+tab1, tab2 = st.tabs(["🏆 Best Window per ETF", "🔍 Explore by Window"])
+
+UNIVERSE_ORDER = ["FI_COMMODITIES", "EQUITY_SECTORS", "COMBINED"]
+UNIVERSE_LABELS = {
+    "FI_COMMODITIES": "🏦 FI & Commodities",
+    "EQUITY_SECTORS": "📈 Equity Sectors",
+    "COMBINED": "🌐 Combined",
+}
+
+ntd = next_trading_day()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 1 - BEST WINDOW PER ETF
+# ══════════════════════════════════════════════════════════════════════════════
+with tab1:
+    st.header("🏆 Best Window per ETF — Sig-Bridge Signal")
+
+    with st.expander("📖 How Sig-Bridge Works", expanded=True):
+        st.markdown("""
+**Signature-Conditioned Neural Bridge** solves the Schrödinger Bridge problem:
+
+| Step | What happens |
+|------|-------------|
+| 1. Path signature | Compute truncated signature of the path |
+| 2. Encode states | Encode start and end market states |
+| 3. Conditional flow matching | Learn drift conditioned on signature |
+| 4. Bridge construction | Generate paths between states |
+| 5. Bridge metrics | Width and curvature of the bridge |
+
+**Interpretation:**
+- **Higher z-score** → Wider, more complex bridge (more uncertainty)
+- **Bridge Width** → Uncertainty in the path interpolation
+- **Bridge Curvature** → Non-linearity of the bridge
+        """)
+
+    for universe_name in UNIVERSE_ORDER:
+        uni_data = data1.get("universes", {}).get(universe_name, {})
+        if not uni_data:
+            continue
+
+        label = UNIVERSE_LABELS.get(universe_name, universe_name)
+        full_scores = uni_data.get("full_scores", {})
+
+        st.markdown(f'<div class="uni-title">{label}</div>', unsafe_allow_html=True)
+
+        # ── TOP BUYS ──────────────────────────────────────────────────────────
+        buy_etfs = []
+        for ticker, data in full_scores.items():
+            z = safe_float(data.get("z_score", 0))
+            if z > 0.5:
+                buy_etfs.append((ticker, z, data))
+
+        buy_etfs = sorted(buy_etfs, key=lambda x: x[1], reverse=True)
+
+        if buy_etfs:
+            cols = st.columns(3)
+            for idx, (ticker, z_score, data) in enumerate(buy_etfs[:3]):
+                best_window = data.get("window", "N/A")
+                bridge_width = safe_float(data.get("bridge_width", 0))
+                action = data.get("action", "HOLD")
+
+                with cols[idx]:
+                    st.markdown(f"""
+<div class="hero-card">
+  <div class="ticker">⭐ {ticker}</div>
+  <div class="score">z-score = {z_score:+.3f}</div>
+  <div class="score">{action_badge(action)}</div>
+  <div class="score">Bridge Width = {bridge_width:.3f}</div>
+  <div class="score">best window = {best_window}d</div>
+  <div class="next-day">📅 {ntd}</div>
+</div>
+""", unsafe_allow_html=True)
+        else:
+            st.info("No BUY signals in this universe")
+
+        # ── FULL RANKING ──────────────────────────────────────────────────────
+        with st.expander(f"📋 Full ranking — {label}"):
+            if full_scores:
+                rows = []
+                for t, info in full_scores.items():
+                    z = safe_float(info.get("z_score", 0))
+                    rows.append({
+                        "ETF": t,
+                        "z-score": round(z, 4),
+                        "Bridge Width": round(safe_float(info.get("bridge_width", 0)), 4),
+                        "Bridge Curvature": round(safe_float(info.get("bridge_curvature", 0)), 4),
+                        "N Paths": int(safe_float(info.get("n_paths", 0))),
+                        "Best Window (d)": info.get("window", "N/A"),
+                        "Action": info.get("action", "HOLD")
+                    })
+                df_rank = pd.DataFrame(rows).sort_values("z-score", ascending=False)
+
+                styled_df = df_rank.style.map(
+                    lambda x: 'background-color: #27ae60; color: white;' if isinstance(x, (int, float)) and x > 0.5 else '',
+                    subset=['z-score']
+                ).map(
+                    lambda x: 'background-color: #f1c40f; color: black;' if isinstance(x, (int, float)) and -0.5 < x <= 0.5 else '',
+                    subset=['z-score']
+                ).map(
+                    lambda x: 'background-color: #e74c3c; color: white;' if isinstance(x, (int, float)) and x <= -0.5 else '',
+                    subset=['z-score']
+                )
+                st.dataframe(styled_df, use_container_width=True, hide_index=True)
+
+        st.divider()
+
+    st.caption(f"Run date: {data1.get('run_date','?')} · Higher z-score = wider/ more complex bridge")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 2 - EXPLORE BY WINDOW
+# ══════════════════════════════════════════════════════════════════════════════
+with tab2:
+    st.header("🔍 Explore Sig-Bridge by Window")
+
+    if not data2:
+        st.warning("Window-level data not found. Re-run trainer.")
+        st.stop()
+
+    all_wins = set()
+    for ud in data2.get("universes", {}).values():
+        all_wins.update(ud.get("windows", {}).keys())
+    win_options = sorted([int(w) for w in all_wins])
+
+    if not win_options:
+        st.error("No window data.")
+        st.stop()
+
+    win_labels = {
+        21: "21d  (~1 month) — Short-term",
+        63: "63d  (~3 months) — Core Bridge",
+        126: "126d (~6 months) — Medium-term",
+        252: "252d (~1 year) — Structural",
+        504: "504d (~2 years) — Long-term",
+    }
+
+    default_idx = win_options.index(63) if 63 in win_options else 0
+    selected_win = st.selectbox(
+        "Select lookback window",
+        options=win_options,
+        index=default_idx,
+        format_func=lambda w: win_labels.get(w, f"{w}d"),
+    )
+    win_key = str(selected_win)
+
+    with st.expander("ℹ️ Window guidance", expanded=False):
+        st.markdown("""
+- **21d** — Ultra-short bridge: captures immediate path uncertainty
+- **63d** — Short-term bridge: recommended primary signal
+- **126d** — Medium-term bridge: structural path features
+- **252d** — Annual bridge: core structural signal
+- **504d** — Long-term bridge: secular path features
+        """)
+
+    st.markdown(f"### Sig-Bridge Rankings at **{win_labels.get(selected_win, f'{selected_win}d')}** window")
+
+    for universe_name in UNIVERSE_ORDER:
+        label = UNIVERSE_LABELS.get(universe_name, universe_name)
+        uni_data = data2.get("universes", {}).get(universe_name, {})
+        win_data = uni_data.get("windows", {}).get(win_key)
+
+        st.markdown(f'<div class="uni-title">{label}</div>', unsafe_allow_html=True)
+
+        if not win_data:
+            st.info(f"No data for {universe_name} at {selected_win}d.")
+            st.divider()
+            continue
+
+        # ── TOP BUYS ──────────────────────────────────────────────────────────
+        top_buys = win_data.get("top_buys", [])
+        if top_buys:
+            cols = st.columns(3)
+            for idx, etf in enumerate(top_buys[:3]):
+                ticker = etf["ticker"]
+                z_score = safe_float(etf.get("z_score", 0))
+                action = get_action(z_score)
+
+                with cols[idx]:
+                    st.markdown(f"""
+<div class="win-card">
+  <div class="ticker">⭐ {ticker}</div>
+  <div class="score">z-score = {z_score:+.3f}</div>
+  <div class="score">{action_badge(action)}</div>
+  <div class="next-day">window = {selected_win}d · 📅 {ntd}</div>
+</div>
+""", unsafe_allow_html=True)
+
+        # ── FULL RANKING ──────────────────────────────────────────────────────
+        with st.expander(f"📋 Full ranking — {label} @ {selected_win}d"):
+            rows = win_data.get("full_ranking", [])
+            if rows:
+                df_win = pd.DataFrame(rows)
+                df_win.columns = ["ETF", "z-score", "Action"]
+                df_win.insert(0, "Rank", range(1, len(df_win) + 1))
+
+                styled_df = df_win.style.map(
+                    lambda x: 'background-color: #27ae60; color: white;' if isinstance(x, (int, float)) and x > 0.5 else '',
+                    subset=['z-score']
+                ).map(
+                    lambda x: 'background-color: #f1c40f; color: black;' if isinstance(x, (int, float)) and -0.5 < x <= 0.5 else '',
+                    subset=['z-score']
+                ).map(
+                    lambda x: 'background-color: #e74c3c; color: white;' if isinstance(x, (int, float)) and x <= -0.5 else '',
+                    subset=['z-score']
+                )
+                st.dataframe(styled_df, use_container_width=True, hide_index=True)
+
+        st.divider()
+
+    st.caption(f"Window: {selected_win}d · Run date: {data2.get('run_date','?')}")
