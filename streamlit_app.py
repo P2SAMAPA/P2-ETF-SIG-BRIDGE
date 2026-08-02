@@ -33,7 +33,7 @@ st.markdown("""
                  font-weight:700;color:white}
 .badge-strongsell{background:#7a1a1a;border-radius:6px;padding:2px 12px;font-size:0.75rem;
                   font-weight:700;color:white}
-.badge-bridge{background:#8e44ad;border-radius:6px;padding:2px 8px;font-size:0.65rem;
+.badge-reduce{background:#e67e22;border-radius:6px;padding:2px 12px;font-size:0.75rem;
               font-weight:700;color:white}
 </style>
 """, unsafe_allow_html=True)
@@ -63,6 +63,19 @@ def next_trading_day() -> str:
         d += timedelta(days=1)
     return d.strftime("%B %d, %Y")
 
+def get_action(z_score: float) -> str:
+    """Determine action based on z-score."""
+    if z_score > 1.0:
+        return "STRONG BUY"
+    elif z_score > 0.5:
+        return "BUY"
+    elif z_score > -0.5:
+        return "HOLD"
+    elif z_score > -1.0:
+        return "REDUCE"
+    else:
+        return "STRONG SELL"
+
 def action_badge(action: str) -> str:
     if "STRONG BUY" in action:
         return f'<span class="badge-strongbuy">🟢 {action}</span>'
@@ -72,6 +85,8 @@ def action_badge(action: str) -> str:
         return f'<span class="badge-strongsell">🔴 {action}</span>'
     elif "SELL" in action:
         return f'<span class="badge-sell">🔴 {action}</span>'
+    elif "REDUCE" in action:
+        return f'<span class="badge-reduce">🟠 {action}</span>'
     else:
         return f'<span class="badge-hold">🟡 {action}</span>'
 
@@ -210,7 +225,7 @@ with tab1:
             for idx, (ticker, z_score, data) in enumerate(buy_etfs[:3]):
                 best_window = data.get("window", "N/A")
                 bridge_width = safe_float(data.get("bridge_width", 0))
-                action = data.get("action", "HOLD")
+                action = get_action(z_score)
 
                 with cols[idx]:
                     st.markdown(f"""
@@ -237,9 +252,10 @@ with tab1:
                         "z-score": round(z, 4),
                         "Bridge Width": round(safe_float(info.get("bridge_width", 0)), 4),
                         "Bridge Curvature": round(safe_float(info.get("bridge_curvature", 0)), 4),
+                        "Bridge Energy": round(safe_float(info.get("bridge_energy", 0)), 4),
                         "N Paths": int(safe_float(info.get("n_paths", 0))),
                         "Best Window (d)": info.get("window", "N/A"),
-                        "Action": info.get("action", "HOLD")
+                        "Action": get_action(z)
                     })
                 df_rank = pd.DataFrame(rows).sort_values("z-score", ascending=False)
 
@@ -319,6 +335,13 @@ with tab2:
             st.divider()
             continue
 
+        # ── Get full_ranking and build action lookup ──────────────────────────
+        full_ranking = win_data.get("full_ranking", [])
+        action_lookup = {}
+        for row in full_ranking:
+            if len(row) >= 3:
+                action_lookup[row[0]] = row[2]
+
         # ── TOP BUYS ──────────────────────────────────────────────────────────
         top_buys = win_data.get("top_buys", [])
         if top_buys:
@@ -326,7 +349,7 @@ with tab2:
             for idx, etf in enumerate(top_buys[:3]):
                 ticker = etf["ticker"]
                 z_score = safe_float(etf.get("z_score", 0))
-                action = get_action(z_score)
+                action = action_lookup.get(ticker, "HOLD")
 
                 with cols[idx]:
                     st.markdown(f"""
@@ -337,10 +360,12 @@ with tab2:
   <div class="next-day">window = {selected_win}d · 📅 {ntd}</div>
 </div>
 """, unsafe_allow_html=True)
+        else:
+            st.info("No BUY signals at this window")
 
-        # ── FULL RANKING ──────────────────────────────────────────────────────
+        # ── FULL RANKING TABLE ──────────────────────────────────────────────
         with st.expander(f"📋 Full ranking — {label} @ {selected_win}d"):
-            rows = win_data.get("full_ranking", [])
+            rows = full_ranking
             if rows:
                 df_win = pd.DataFrame(rows)
                 df_win.columns = ["ETF", "z-score", "Action"]
