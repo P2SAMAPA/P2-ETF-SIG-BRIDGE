@@ -4,9 +4,9 @@ config.py  —  Configuration for Sig-Bridge Engine
 
 Defines:
   - UNIVERSES: ETF ticker sets
-  - SIGNATURE: Path signature parameters
-  - SDE: Neural SDE parameters
-  - BRIDGE: Schrödinger Bridge parameters
+  - SIGNATURE: Path signature parameters (depth, normalization)
+  - SDE: Neural SDE parameters (drift/diffusion networks, training)
+  - BRIDGE: Schrödinger Bridge parameters (flow matching, time steps)
   - WINDOWS: Time windows for bridge construction
 """
 
@@ -42,7 +42,7 @@ UNIVERSES = {
 WINDOWS = [21, 63, 126, 252, 504]
 WINDOW_LABELS = {
     21: "21d  (~1 month) — Short-term Bridge",
-    63: "63d  (~3 months) — Core Bridge",
+    63: "63d  (~3 months) — Core Signal",
     126: "126d (~6 months) — Medium-term",
     252: "252d (~1 year) — Structural Bridge",
     504: "504d (~2 years) — Long-term",
@@ -62,7 +62,7 @@ SIGNATURE = {
 
 # ── Neural SDE Parameters ──────────────────────────────────────────────────
 
-SDE = {
+NEURAL_SDE = {
     "state_dim": 16,           # Latent state dimension
     "hidden_dim": 128,         # Neural network hidden size
     "n_layers": 3,             # Number of layers
