@@ -99,7 +99,7 @@ def run_trainer(hf_token: Optional[str] = None) -> Dict:
 
     engine_config = {
         "signature": config.SIGNATURE,
-        "sde": config.SDE,
+        "neural_sde": config.NEURAL_SDE,
         "bridge": config.BRIDGE,
     }
 
@@ -175,6 +175,7 @@ def run_trainer(hf_token: Optional[str] = None) -> Dict:
                     "window": int(best_win),
                     "bridge_width": safe_float(best_data.get("bridge_width", 0)),
                     "bridge_curvature": safe_float(best_data.get("bridge_curvature", 0)),
+                    "bridge_energy": safe_float(best_data.get("bridge_energy", 0)),
                     "n_paths": int(safe_float(best_data.get("n_paths", 0))),
                     "action": get_action(best_z)
                 }
