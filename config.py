@@ -4,9 +4,9 @@ config.py  —  Configuration for Sig-Bridge Engine
 
 Defines:
   - UNIVERSES: ETF ticker sets
-  - SIGNATURE: Path signature parameters (depth, normalization)
-  - SDE: Neural SDE parameters (drift/diffusion networks, training)
-  - BRIDGE: Schrödinger Bridge parameters (flow matching, time steps)
+  - SIGNATURE: Path signature parameters
+  - NEURAL_SDE: Neural SDE parameters
+  - BRIDGE: Schrödinger Bridge parameters
   - WINDOWS: Time windows for bridge construction
 """
 
@@ -41,10 +41,10 @@ UNIVERSES = {
 
 WINDOWS = [21, 63, 126, 252, 504]
 WINDOW_LABELS = {
-    21: "21d  (~1 month) — Short-term Bridge",
+    21: "21d  (~1 month) — Short-term",
     63: "63d  (~3 months) — Core Signal",
     126: "126d (~6 months) — Medium-term",
-    252: "252d (~1 year) — Structural Bridge",
+    252: "252d (~1 year) — Structural",
     504: "504d (~2 years) — Long-term",
 }
 PRIMARY_WINDOW = 63
@@ -53,35 +53,33 @@ PRIMARY_WINDOW = 63
 # ── Signature Parameters ──────────────────────────────────────────────────
 
 SIGNATURE = {
-    "depth": 3,                # Truncation depth of path signature
-    "n_landmarks": 100,        # Landmarks for signature computation
-    "include_time": True,      # Include time as a dimension
-    "normalize": True,         # Normalize signature components
+    "depth": 3,
+    "n_landmarks": 100,
+    "include_time": True,
+    "normalize": True,
 }
 
 
 # ── Neural SDE Parameters ──────────────────────────────────────────────────
 
 NEURAL_SDE = {
-    "state_dim": 16,           # Latent state dimension
-    "hidden_dim": 128,         # Neural network hidden size
-    "n_layers": 3,             # Number of layers
-    "drift_net": "mlp",        # Drift network type
-    "diffusion_net": "mlp",    # Diffusion network type
-    "learning_rate": 0.001,    # Learning rate
-    "n_epochs": 100,           # Training epochs
-    "batch_size": 64,          # Batch size
+    "state_dim": 16,
+    "hidden_dim": 128,
+    "n_layers": 3,
+    "learning_rate": 0.001,
+    "n_epochs": 100,
+    "batch_size": 64,
 }
 
 
 # ── Schrödinger Bridge Parameters ──────────────────────────────────────────
 
 BRIDGE = {
-    "n_time_steps": 30,        # Number of time steps in the bridge
-    "n_paths": 100,            # Number of paths to generate
-    "flow_matching": True,     # Use conditional flow matching
-    "temperature": 1.0,        # Temperature for path generation
-    "convergence_threshold": 1e-4,  # Convergence threshold
+    "n_time_steps": 30,
+    "n_paths": 100,
+    "flow_matching": True,
+    "temperature": 1.0,
+    "convergence_threshold": 1e-4,
 }
 
 
